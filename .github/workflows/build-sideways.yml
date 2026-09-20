@@ -1,0 +1,40 @@
+name: Build patched DockDoor (sideways previews)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project DockDoor.xcodeproj -scheme DockDoor
+
+      - name: Build Release
+        run: |
+          xcodebuild build \
+            -project DockDoor.xcodeproj \
+            -scheme DockDoor \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION=1.40.1 \
+            CURRENT_PROJECT_VERSION=1.40.1 \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Ad-hoc sign and zip
+        run: |
+          APP="build/Build/Products/Release/DockDoor.app"
+          ls -la "$APP"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --keepParent "$APP" DockDoor-sideways.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DockDoor-sideways
+          path: DockDoor-sideways.zip
