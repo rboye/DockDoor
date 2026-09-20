@@ -261,7 +261,13 @@ extension WindowPreviewHoverContainer {
             effectiveMaxRows = (dockPosition == .cmdTab) ? 1 : previewMaxRows
         } else {
             effectiveMaxColumns = previewMaxColumns
-            effectiveMaxRows = calculatedMaxRows
+            // Left/right dock: lay windows out in a single horizontal row (HyperDock-style)
+            // whenever they fit within the column limit and the screen width.
+            if let totalItems, totalItems <= min(previewMaxColumns, calculatedMaxColumns) {
+                effectiveMaxRows = 1
+            } else {
+                effectiveMaxRows = calculatedMaxRows
+            }
         }
 
         return (effectiveMaxColumns, effectiveMaxRows)
@@ -380,7 +386,9 @@ extension WindowPreviewHoverContainer {
             totalItems: totalItems
         )
 
-        let shouldReverse = (dockPosition == .bottom || dockPosition == .right) && !isWindowSwitcherActive
+        // Keep left-to-right order when a side dock shows a single horizontal row
+        let singleRowSideDock = !isHorizontalFlow && maxRows == 1
+        let shouldReverse = (dockPosition == .bottom || dockPosition == .right) && !isWindowSwitcherActive && !singleRowSideDock
 
         let isVerticalScroll = isWindowSwitcherActive && Defaults[.windowSwitcherScrollDirection] == .vertical
         return navigateInGrid(
