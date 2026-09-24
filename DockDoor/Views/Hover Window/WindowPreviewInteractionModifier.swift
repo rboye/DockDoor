@@ -40,7 +40,7 @@ struct WindowPreviewInteractionModifier: ViewModifier {
                 handleWindowTap()
             }
             .contextMenu {
-                WindowActionsMenuContent(windowInfo: windowInfo, handleWindowAction: handleWindowAction)
+                WindowActionsMenuContent(windowInfo: windowInfo, handleWindowAction: handleWindowAction, allowReorder: !windowSwitcherActive && !useCompactMode)
             }
     }
 
@@ -151,9 +151,33 @@ extension View {
 struct WindowActionsMenuContent: View {
     let windowInfo: WindowInfo
     let handleWindowAction: (WindowAction) -> Void
+    var allowReorder: Bool = false
 
     var body: some View {
         let groups = WindowAction.availableGroups(for: windowInfo)
+        if allowReorder, !windowInfo.isWindowlessApp {
+            Menu {
+                Button { ManualWindowOrder.move(windowInfo, .toFront) } label: {
+                    Label(String(localized: "Move to Front", comment: "Reorder preview"), systemImage: "arrow.left.to.line")
+                }
+                Button { ManualWindowOrder.move(windowInfo, .earlier) } label: {
+                    Label(String(localized: "Move Back One", comment: "Reorder preview"), systemImage: "arrow.left")
+                }
+                Button { ManualWindowOrder.move(windowInfo, .later) } label: {
+                    Label(String(localized: "Move Forward One", comment: "Reorder preview"), systemImage: "arrow.right")
+                }
+                Button { ManualWindowOrder.move(windowInfo, .toEnd) } label: {
+                    Label(String(localized: "Move to End", comment: "Reorder preview"), systemImage: "arrow.right.to.line")
+                }
+                Divider()
+                Button { ManualWindowOrder.clear() } label: {
+                    Label(String(localized: "Reset Arranged Order", comment: "Reorder preview"), systemImage: "arrow.counterclockwise")
+                }
+            } label: {
+                Label(String(localized: "Reorder", comment: "Reorder preview"), systemImage: "arrow.left.arrow.right")
+            }
+            Divider()
+        }
         ForEach(groups) { entry in
             if entry.id != groups.first?.id {
                 Divider()
