@@ -1741,7 +1741,9 @@ extension WindowUtil {
             Defaults[.cmdTabSortOrder]
         }
 
-        return sortWindowsWithOptions(windows, sortOrder: sortOrder)
+        let sorted = sortWindowsWithOptions(windows, sortOrder: sortOrder)
+        // Dock previews honour the order the user arranged by drag & drop / context menu.
+        return context == .dockPreview ? ManualWindowOrder.apply(to: sorted) : sorted
     }
 
     /// Centralized sorting for window switcher context (all apps windows)
@@ -1762,7 +1764,10 @@ extension WindowUtil {
         case .recentlyUsed:
             windows.sorted { $0.lastAccessedTime != $1.lastAccessedTime ? $0.lastAccessedTime > $1.lastAccessedTime : $0.id > $1.id }
         case .creationOrder:
-            windows.sorted { $0.creationTime != $1.creationTime ? $0.creationTime < $1.creationTime : $0.id < $1.id }
+            // CGWindowIDs are handed out by WindowServer in strictly increasing order for the whole
+            // login session, so sorting by ID gives true creation order that survives DockDoor
+            // restarts and crashes (unlike the discovery timestamp, which reset on every launch).
+            windows.sorted { $0.id < $1.id }
         case .alphabeticalByTitle:
             windows.sorted { ($0.windowName ?? "").localizedCaseInsensitiveCompare($1.windowName ?? "") == .orderedAscending }
         case .alphabeticalByAppName:
