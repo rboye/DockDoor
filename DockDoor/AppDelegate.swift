@@ -43,6 +43,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        guard enforceSingleInstance() else { return }
+
         applyAppearanceMode(Defaults[.appAppearanceMode])
 
         reconcileImagePreviewWithPermission()
@@ -293,6 +295,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func restartApp() {
         Process.launchedProcess(launchPath: "/usr/bin/open", arguments: ["-n", Bundle.main.bundlePath])
         quitApp()
+    }
+
+    /// Makes sure only one DockDoor runs. When this instance was started by the launchd keep-alive
+    /// agent (`--keepalive`), it wins and asks any other instance to quit; otherwise this instance
+    /// yields to an already running one. Returns false when this instance should stop launching.
+    private func enforceSingleInstance() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return true }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != myPID && !$0.isTerminated }
+        guard !others.isEmpty else { return true }
+
+        if ProcessInfo.processInfo.arguments.contains("--keepalive") {
+            for other in others {
+                other.terminate()
+            }
+            return true
+        }
+
+        NSApp.terminate(nil)
+        return false
     }
 
     private func handleFirstTimeLaunch() {
