@@ -232,7 +232,7 @@ final class WindowLiveCapture: ObservableObject {
         do {
             let newStream = SCStream(filter: filter, configuration: config, delegate: nil)
 
-            let output = StreamOutput { [weak self] image in
+            let output = StreamOutput(windowSize: window.frame.size) { [weak self] image in
                 Task { @MainActor in
                     self?.lastFrame = image
                     self?.capturedImage = image
@@ -302,14 +302,42 @@ final class WindowLiveCapture: ObservableObject {
 
 private class StreamOutput: NSObject, SCStreamOutput {
     private let onFrame: (CGImage) -> Void
+    private let windowSize: CGSize
 
-    init(onFrame: @escaping (CGImage) -> Void) {
+    init(windowSize: CGSize, onFrame: @escaping (CGImage) -> Void) {
+        self.windowSize = windowSize
         self.onFrame = onFrame
         super.init()
     }
 
+    /// Only complete frames carry real pixels; idle/blank/suspended frames and frames whose content
+    /// is just a thin slice of the window (mid-transition) would otherwise be shown stretched.
+    private func isUsableFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let attachments = (CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first else {
+            return true
+        }
+        if let statusRawValue = attachments[.status] as? Int,
+           let status = SCFrameStatus(rawValue: statusRawValue),
+           status != .complete
+        {
+            return false
+        }
+        if let rectDictionary = attachments[.contentRect] as? NSDictionary,
+           let contentRect = CGRect(dictionaryRepresentation: rectDictionary),
+           windowSize.width > 0, windowSize.height > 0
+        {
+            let widthRatio = contentRect.width / windowSize.width
+            let heightRatio = contentRect.height / windowSize.height
+            if widthRatio < 0.2 || heightRatio < 0.2 {
+                return false
+            }
+        }
+        return true
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen else { return }
+        guard isUsableFrame(sampleBuffer) else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         var cgImage: CGImage?
