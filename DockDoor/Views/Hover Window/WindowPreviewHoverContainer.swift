@@ -1247,7 +1247,21 @@ struct WindowPreviewHoverContainer: View {
                         }
                         .onEnded { value in
                             if draggedWindowIndex == index {
-                                handleWindowDrop(at: NSEvent.mouseLocation, for: index)
+                                let dropLocation = NSEvent.mouseLocation
+                                if !previewStateCoordinator.windowSwitcherActive,
+                                   let targetIndex = previewStateCoordinator.reorderTargetIndex(atScreenPoint: dropLocation)
+                                {
+                                    // Dropped on another card inside the panel: rearrange instead of moving the window.
+                                    ManualWindowOrder.move(
+                                        fromIndex: index,
+                                        toIndex: targetIndex,
+                                        in: previewStateCoordinator,
+                                        dockPosition: dockPosition,
+                                        bestGuessMonitor: bestGuessMonitor
+                                    )
+                                } else {
+                                    handleWindowDrop(at: dropLocation, for: index)
+                                }
                                 DragPreviewCoordinator.shared.endDragging()
                                 draggedWindowIndex = nil
                                 isDragging = false
