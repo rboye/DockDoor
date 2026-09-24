@@ -188,6 +188,9 @@ struct CardGridScrollView: NSViewRepresentable {
             scrolledFromStart = representable.$scrolledFromStart
 
             container.onOffsetChange = { [weak self] offset in self?.offsetChanged(offset) }
+            representable.coordinator.reorderTargetIndexProvider = { [weak self] point in
+                self?.windowIndex(atScreenPoint: point)
+            }
 
             representable.coordinator.selection.$currIndex
                 .dropFirst()
@@ -344,6 +347,27 @@ struct CardGridScrollView: NSViewRepresentable {
                 cross += lineThickness + layout.spacing
             }
             return frames
+        }
+
+        /// Index of the window card at (or, inside the panel, nearest to) a screen point. Nil when the
+        /// point is outside the panel, so a drag that ends there still means "move the real window".
+        private func windowIndex(atScreenPoint screenPoint: CGPoint) -> Int? {
+            guard let container, let window = container.window else { return nil }
+            guard window.frame.contains(screenPoint) else { return nil }
+            let windowPoint = window.convertPoint(fromScreen: screenPoint)
+            let point = container.contentView.convert(windowPoint, from: nil)
+
+            var best: (index: Int, distance: CGFloat)?
+            for (item, frame) in frames {
+                guard case let .window(index) = item else { continue }
+                if frame.contains(point) { return index }
+                let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+                let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
+                let distance = hypot(dx, dy)
+                if let current = best, current.distance <= distance { continue }
+                best = (index, distance)
+            }
+            return best?.index
         }
 
         private func offsetChanged(_ offset: CGFloat) {
