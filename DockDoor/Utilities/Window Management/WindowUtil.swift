@@ -535,6 +535,9 @@ extension WindowUtil {
             }
         }
 
+        let previousImage = desktopSpaceWindowCacheManager.readCache(pid: pid)
+            .first(where: { $0.id == windowID })?.image
+
         var cgImage: CGImage
         let connectionID = CGSMainConnectionID()
         var windowIDUInt32 = UInt32(windowID)
@@ -552,6 +555,12 @@ extension WindowUtil {
         let clipped = capturedImage.map { isClippedBySpaceTransition($0, bounds: bounds, windowID: windowID) } ?? false
         logCapture(windowID: windowID, pid: pid, title: windowTitle, image: capturedImage, transparent: transparent, clipped: clipped, entry: entry, quality: qualityOption)
         guard let capturedImage, !transparent, !clipped else {
+            throw captureError
+        }
+        // WindowServer occasionally hands back a smeared/stretched frame (e.g. for a window that is
+        // mid-transition). Never let such a frame replace a good preview we already have.
+        if let previousImage, isSmearedCapture(capturedImage), !isSmearedCapture(previousImage) {
+            DebugLogger.log("Window capture", details: "Rejected smeared capture for window \(windowID); keeping previous image")
             throw captureError
         }
         cgImage = capturedImage
@@ -582,6 +591,45 @@ extension WindowUtil {
         }
 
         return cgImage
+    }
+
+    /// True when an image looks like a smeared or stretched capture: almost no detail along one
+    /// axis while the other axis still varies (vertical or horizontal streaks).
+    static func isSmearedCapture(_ image: CGImage) -> Bool {
+        let size = 64
+        guard image.width >= 16, image.height >= 16,
+              let context = CGContext(
+                  data: nil,
+                  width: size,
+                  height: size,
+                  bitsPerComponent: 8,
+                  bytesPerRow: size,
+                  space: CGColorSpaceCreateDeviceGray(),
+                  bitmapInfo: CGImageAlphaInfo.none.rawValue
+              )
+        else { return false }
+        context.interpolationQuality = .low
+        context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
+        guard let data = context.data else { return false }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: size * size)
+
+        var horizontalDiff = 0
+        var verticalDiff = 0
+        for y in 0 ..< size {
+            for x in 0 ..< size {
+                let value = Int(pixels[y * size + x])
+                if x + 1 < size { horizontalDiff += abs(value - Int(pixels[y * size + x + 1])) }
+                if y + 1 < size { verticalDiff += abs(value - Int(pixels[(y + 1) * size + x])) }
+            }
+        }
+        let samples = Double(size * (size - 1))
+        let meanHorizontal = Double(horizontalDiff) / samples
+        let meanVertical = Double(verticalDiff) / samples
+        let detailFloor = 3.0
+        let ratio = 0.08
+        if meanVertical > detailFloor, meanHorizontal < ratio * meanVertical { return true } // vertical streaks
+        if meanHorizontal > detailFloor, meanVertical < ratio * meanHorizontal { return true } // horizontal streaks
+        return false
     }
 
     private static func isClippedBySpaceTransition(_ image: CGImage, bounds: CGRect?, windowID: CGWindowID) -> Bool {
