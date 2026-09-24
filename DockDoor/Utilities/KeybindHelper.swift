@@ -3,13 +3,6 @@ import Carbon
 import Carbon.HIToolbox.Events
 import Defaults
 
-private class KeybindHelperUserInfo {
-    let instance: KeybindHelper
-    init(instance: KeybindHelper) {
-        self.instance = instance
-    }
-}
-
 struct UserKeyBind: Codable, Defaults.Serializable {
     var keyCode: UInt16
     var modifierFlags: Int
@@ -396,8 +389,6 @@ class KeybindHelper {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var monitorTimer: Timer?
-    private var unmanagedEventTapUserInfo: Unmanaged<KeybindHelperUserInfo>?
-
     init(previewCoordinator: SharedPreviewWindowCoordinator) {
         self.previewCoordinator = previewCoordinator
         setupEventTap()
@@ -461,9 +452,14 @@ class KeybindHelper {
         }
     }
 
+    // The refcon is the KeybindHelper itself (unretained). KeybindHelper lives for the whole app
+    // lifetime (owned by AppDelegate), so the pointer stays valid even if the tap is torn down and
+    // re-created from the main thread while the event-tap thread is still delivering events.
+    // (Previously a separately retained wrapper object was released in removeEventTap(), which
+    // raced with in-flight callbacks and crashed with EXC_BAD_ACCESS in handleEvent.)
     private static let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
         guard let refcon else { return Unmanaged.passUnretained(event) }
-        return Unmanaged<KeybindHelperUserInfo>.fromOpaque(refcon).takeUnretainedValue().instance.handleEvent(proxy: proxy, type: type, event: event)
+        return Unmanaged<KeybindHelper>.fromOpaque(refcon).takeUnretainedValue().handleEvent(proxy: proxy, type: type, event: event)
     }
 
     private func setupEventTap() {
@@ -474,18 +470,14 @@ class KeybindHelper {
             (1 << CGEventType.flagsChanged.rawValue) |
             (1 << CGEventType.leftMouseDown.rawValue)
 
-        let userInfo = KeybindHelperUserInfo(instance: self)
-        let retainedUserInfo = Unmanaged.passRetained(userInfo)
-
         guard let newEventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(eventMask),
             callback: KeybindHelper.eventCallback,
-            userInfo: retainedUserInfo.toOpaque()
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            retainedUserInfo.release()
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 print("Retrying KeybindHelper event tap setup...")
                 self?.setupEventTap()
@@ -493,7 +485,6 @@ class KeybindHelper {
             return
         }
 
-        unmanagedEventTapUserInfo = retainedUserInfo
         eventTap = newEventTap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, newEventTap, 0)
 
@@ -511,8 +502,6 @@ class KeybindHelper {
             }
             CFMachPortInvalidate(eventTap)
         }
-        unmanagedEventTapUserInfo?.release()
-        unmanagedEventTapUserInfo = nil
         eventTap = nil
         runLoopSource = nil
     }
@@ -521,6 +510,9 @@ class KeybindHelper {
         if let passthrough = reEnableIfNeeded(tap: eventTap, type: type, event: event) {
             return passthrough
         }
+        // Events can still arrive for a tap that is being torn down (reset()/recover() on the main
+        // thread); ignore them instead of acting on stale state.
+        guard eventTap != nil else { return Unmanaged.passUnretained(event) }
 
         switch type {
         case .flagsChanged:
