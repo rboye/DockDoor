@@ -105,7 +105,15 @@ class PreviewStateCoordinator: ObservableObject {
     var hasEmbeddedContent: Bool = false
 
     var onFrameRefreshNeeded: (() -> Void)?
-    private var lastKnownBestGuessMonitor: NSScreen?
+    private(set) var lastKnownBestGuessMonitor: NSScreen?
+
+    /// Installed by the card grid: maps a screen point (AppKit coordinates) to the index of the
+    /// preview card at/nearest that point, or nil when the point is outside the preview panel.
+    var reorderTargetIndexProvider: ((CGPoint) -> Int?)?
+
+    func reorderTargetIndex(atScreenPoint point: CGPoint) -> Int? {
+        reorderTargetIndexProvider?(point)
+    }
 
     enum WindowState {
         case windowSwitcher
