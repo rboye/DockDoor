@@ -6,6 +6,8 @@
 	<true/>
 	<key>OSAScriptingDefinition</key>
 	<string>DockDoor.sdef</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
