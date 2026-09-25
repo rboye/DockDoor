@@ -553,8 +553,14 @@ extension WindowUtil {
         let bounds = (entry?[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) }
         let transparent = capturedImage.map(isFullyTransparent) ?? false
         let clipped = capturedImage.map { isClippedBySpaceTransition($0, bounds: bounds, windowID: windowID) } ?? false
+        // Reject slivers and other captures whose shape does not match the window at all
+        // (seen as a thin vertical line in the preview card), regardless of which Space the window is on.
+        let implausible = capturedImage.map { !isPlausibleCapture($0, bounds: bounds) } ?? false
+        if implausible, let capturedImage {
+            DebugLogger.log("Window capture", details: "Rejected implausible capture \(capturedImage.width)x\(capturedImage.height) for window \(windowID), bounds \(String(describing: bounds))")
+        }
         logCapture(windowID: windowID, pid: pid, title: windowTitle, image: capturedImage, transparent: transparent, clipped: clipped, entry: entry, quality: qualityOption)
-        guard let capturedImage, !transparent, !clipped else {
+        guard let capturedImage, !transparent, !clipped, !implausible else {
             throw captureError
         }
         // WindowServer occasionally hands back a smeared/stretched frame (e.g. for a window that is
@@ -591,6 +597,18 @@ extension WindowUtil {
         }
 
         return cgImage
+    }
+
+    /// A capture is plausible when its proportions match the window's on-screen bounds. Captures of a
+    /// window mid-transition can come back as a few-pixel-wide sliver or a squashed strip instead.
+    static func isPlausibleCapture(_ image: CGImage, bounds: CGRect?) -> Bool {
+        guard image.width > 0, image.height > 0 else { return false }
+        let imageAspect = CGFloat(image.width) / CGFloat(image.height)
+        if let bounds, bounds.width >= 8, bounds.height >= 8 {
+            let boundsAspect = bounds.width / bounds.height
+            return abs(imageAspect - boundsAspect) / boundsAspect <= 0.25
+        }
+        return image.width >= 24 && image.height >= 24 && imageAspect > 0.125 && imageAspect < 8
     }
 
     /// True when an image looks like a smeared or stretched capture: almost no detail along one
